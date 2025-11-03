@@ -67,7 +67,7 @@ jobs:
             # Python 가상환경이 없으면 생성
             if [ ! -d "venv" ]; then
               echo "🐍 Creating Python virtual environment..."
-              python3 -m venv venv
+              python3.8 -m venv venv
             fi
             
             # 가상환경 활성화 및 의존성 설치
