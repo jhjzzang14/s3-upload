@@ -64,15 +64,31 @@ jobs:
             S3_BASE_URL=${{ secrets.S3_BASE_URL }}
             EOF
             
+            # 빌드 도구 및 pip 설치
+            echo "🔧 Installing build tools and pip..."
+            sudo apt-get update
+            sudo apt-get install -y python3.8-dev build-essential python3.8-distutils curl
+            
+            # pip가 없으면 설치
+            if ! python3.8 -m pip --version > /dev/null 2>&1; then
+              curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+              python3.8 get-pip.py --user
+              rm get-pip.py
+            fi
+            
+            # virtualenv 설치
+            python3.8 -m pip install --user virtualenv
+            
             # Python 가상환경이 없으면 생성
             if [ ! -d "venv" ]; then
               echo "🐍 Creating Python virtual environment..."
-              python3.8 -m venv venv
+              python3.8 -m virtualenv venv
             fi
             
             # 가상환경 활성화 및 의존성 설치
             echo "📦 Installing Python dependencies..."
             source venv/bin/activate
+            pip install --upgrade pip setuptools wheel
             pip install -r requirements.txt
             
             # 백그라운드에서 S3 업로드 서버 시작
