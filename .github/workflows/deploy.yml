@@ -1,0 +1,92 @@
+# .github/workflows/deploy.yml
+
+name: Deploy S3 Upload Service
+
+# main 브랜치에 push가 발생할 때마다 이 워크플로우를 실행합니다.
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy S3 Upload Service
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. GitHub Repository의 코드를 가상 환경으로 가져옵니다.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. S3 업로드 서비스 파일들을 서버에 복사합니다.
+      - name: Copy S3 upload service files to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          source: "main.py,requirements.txt,templates/,start.sh,README.md"
+          target: ${{ secrets.TARGET }}
+          strip_components: 0
+
+      # 3. 서버에서 Python 환경 설정 및 S3 업로드 서버 시작
+      - name: Setup and restart S3 upload server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          script: |
+            # 대상 디렉토리로 이동
+            cd ${{ secrets.TARGET }}
+            
+            # 실행 권한 부여
+            chmod +x start.sh
+            
+            # 기존 S3 업로드 서버 프로세스 종료 (포트 8888 사용 중인 프로세스)
+            echo "🔍 Checking for existing processes on port 8888..."
+            PID=$(lsof -ti:8888 || echo "")
+            if [ ! -z "$PID" ]; then
+              echo "🛑 Stopping existing S3 upload server (PID: $PID)..."
+              kill -9 $PID || true
+              sleep 2
+            fi
+            
+            # GitHub Secrets을 사용해서 .env 파일 생성
+            echo "📝 Creating .env file from GitHub secrets..."
+            cat > .env << EOF
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}
+            S3_BASE_URL=${{ secrets.S3_BASE_URL }}
+            EOF
+            
+            # Python 가상환경이 없으면 생성
+            if [ ! -d "venv" ]; then
+              echo "🐍 Creating Python virtual environment..."
+              python3 -m venv venv
+            fi
+            
+            # 가상환경 활성화 및 의존성 설치
+            echo "📦 Installing Python dependencies..."
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # 백그라운드에서 S3 업로드 서버 시작
+            echo "🚀 Starting S3 upload service..."
+            nohup venv/bin/python main.py > s3-upload.log 2>&1 &
+            
+            # 서버 시작 확인
+            sleep 5
+            if lsof -ti:8888 > /dev/null; then
+              echo "✅ S3 upload service started successfully on port 8888"
+              echo "📁 Access URL: http://$(hostname -I | awk '{print $1}'):8888"
+            else
+              echo "❌ Failed to start S3 upload service"
+              echo "📋 Server log:"
+              tail -20 s3-upload.log || echo "No log file found"
+              exit 1
+            fi
